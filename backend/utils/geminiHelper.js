@@ -1,37 +1,65 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// const modelId = "models/gemini-2.5-flash";
-const modelId = "models/gemini-1.5-pro";
+/**
+ * Gemini client
+ * API key MUST be in process.env.GEMINI_API_KEY
+ */
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
 
-
-function truncateText(text, maxLength = 12000) {
+/**
+ * Truncate resume text to avoid token overflow
+ */
+function truncateText(text, maxLength = 8000) {
   if (!text) return "";
   return text.length > maxLength ? text.slice(0, maxLength) : text;
 }
 
+/**
+ * Extract JSON safely from Gemini output
+ */
 function extractJSON(text) {
+  if (!text) return null;
+
+  // Remove markdown if present
+  text = text.replace(/```json|```/g, "");
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+
+  if (start === -1 || end === -1) return null;
+
   try {
-    const match = text.match(/{[\s\S]*}/);
-    if (!match) throw new Error("No JSON found");
-    return JSON.parse(match[0]);
-  } catch {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch (err) {
+    console.error("❌ JSON parse error:", err.message);
     return null;
   }
 }
 
-const analyzeResumeWithGeminiFlash = async (resumeText) => {
-  const model = genAI.getGenerativeModel({ model: modelId });
-
+/**
+ * Analyze Resume using Gemini 3 Flash Preview
+ */
+export async function analyzeResumeWithGeminiFlash(resumeText) {
   const prompt = `
-You are an API that ONLY outputs valid JSON.
+You are a STRICT JSON API.
+Return ONLY valid JSON.
+No markdown.
+No explanation.
 
+Schema:
 {
   "matchScore": number,
   "summary": string,
   "missingSkills": string[],
   "suggestions": string[]
 }
+
+Rules:
+- matchScore must be 0–100
+- missingSkills must be an array
+- suggestions must be an array
 
 Resume:
 ${truncateText(resumeText)}
@@ -40,18 +68,24 @@ ${truncateText(resumeText)}
   let rawText = "";
 
   try {
-    const result = await model.generateContent(prompt);
-    rawText = result.response.text();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+    });
 
-    if (!rawText || rawText.trim() === "") {
-      throw new Error("Empty Gemini response");
-    }
+    // 🔑 THIS IS HOW YOU READ OUTPUT IN @google/genai
+    rawText = response.text;
+
+    console.log("🔍 RAW GEMINI RESPONSE:\n", rawText);
 
     const parsed = extractJSON(rawText);
-    if (!parsed) throw new Error("JSON parse failed");
+    if (!parsed) throw new Error("Failed to parse Gemini JSON");
 
     return parsed;
-  } catch {
+  } catch (err) {
+    console.error("❌ Gemini processing error:", err.message);
+    console.error("🔍 Raw output:", rawText);
+
     return {
       matchScore: 0,
       summary: "AI response was unreadable.",
@@ -59,6 +93,4 @@ ${truncateText(resumeText)}
       suggestions: [],
     };
   }
-};
-
-module.exports = { analyzeResumeWithGeminiFlash };
+}
