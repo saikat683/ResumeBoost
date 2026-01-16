@@ -13,5 +13,18 @@ router.post("/check-ats-score", checkATSScore);
 // router.post("/upload", protect, upload.single("resume"), uploadResume);
 
 
+// const upload = require("../middleware/uploadMiddleware");
+const { analyzeResume } = require("../controllers/analysisController");
+const auth = require("../middleware/authMiddleware");
+
+router.post(
+  "/analyze",
+  auth,
+  upload.single("resume"),
+  analyzeResume
+);
+
+
 
 module.exports = router;
+
